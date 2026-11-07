@@ -426,7 +426,7 @@ async function verifyAndNext() {
 
 async function verifyAPI(key, model) {
   try {
-    const res = await fetch("https://api.x.ai/v1/chat/completions", {
+    const res = await fetch("https://nov.jc601027873.workers.dev/v1/chat/completions", {
       method: "POST",
       headers: { "Authorization": "Bearer " + key, "Content-Type": "application/json" },
       body: JSON.stringify({ model, messages: [{role:"user", content:"hi"}], max_tokens: 5 })
@@ -521,7 +521,7 @@ async function generate() {
   const model = document.getElementById("model").value.trim() || "grok-4.7";
   document.getElementById("loading").classList.remove("hidden");
   try {
-    const res = await fetch("https://api.x.ai/v1/chat/completions", {
+    const res = await fetch("https://nov.jc601027873.workers.dev/v1/chat/completions", {
       method: "POST",
       headers: { "Authorization": "Bearer " + key, "Content-Type": "application/json" },
       body: JSON.stringify({ model, messages, temperature: 0.85, max_tokens: 2500 })
