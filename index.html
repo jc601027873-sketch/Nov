@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>互动小说</title>
+<style>
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin:0; padding:0; height:100%; background:#0a0a0a; color:#f0f0f0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+body { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+.container { max-width: 520px; margin: 0 auto; padding: 16px; min-height: 100vh; }
+h1 { font-size: 1.5rem; text-align: center; margin: 16px 0 24px; font-weight: 600; }
+.card { background: #161616; border-radius: 20px; padding: 20px; margin-bottom: 16px; border: 1px solid #2a2a2a; }
+.story { white-space: pre-wrap; word-break: break-word; line-height: 1.8; font-size: 1.05rem; min-height: 40vh; }
+.grid { display: grid; grid-template-columns: 1fr; gap: 12px; margin: 12px 0; }
+.btn { padding: 16px; background: #1e1e1e; border: 1px solid #333; border-radius: 16px; color: #eee; font-size: 0.95rem; text-align: left; cursor: pointer; }
+.btn:active { transform: scale(0.97); }
+.btn.selected { background: #1e3a5f; border-color: #3b82f6; }
+.btn.primary { background: #2563eb; border-color: #2563eb; text-align: center; font-weight: 600; padding: 16px; }
+.choices .btn { margin: 10px 0; width: 100%; padding: 18px; font-size: 1rem; line-height: 1.5; }
+input, textarea { width: 100%; padding: 16px; margin: 10px 0; background: #1e1e1e; border: 1px solid #333; border-radius: 14px; color: #eee; font-size: 16px; }
+textarea { min-height: 80px; resize: vertical; }
+.hidden { display: none !important; }
+.small { font-size: 0.8rem; color: #888; margin: 6px 0; display: block; }
+#loading { text-align: center; padding: 30px; color: #666; }
+.status { font-size: 0.85rem; color: #4ade80; margin-top: 10px; text-align: center; }
+.status.error { color: #f87171; }
+.step-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 12px; }
+.world-btn strong { display: block; font-size: 1.05rem; margin-bottom: 4px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>互动小说</h1>
+
+  <div id="stepApi">
+    <div class="card">
+      <div class="step-title">API 验证</div>
+      <input type="password" id="apiKey" placeholder="Grok API Key">
+      <input type="text" id="model" value="grok-4.7" placeholder="模型名称">
+      <button class="btn primary" onclick="verifyAndNext()">验证并进入</button>
+      <div id="apiStatus" class="status"></div>
+    </div>
+  </div>
+
+  <div id="stepWorld" class="hidden">
+    <div class="card">
+      <div class="step-title">选择世界观</div>
+      <div class="grid" id="worldGrid"></div>
+    </div>
+  </div>
+
+  <div id="stepChar" class="hidden">
+    <div class="card">
+      <div class="step-title">选择你的角色</div>
+      <div class="small">同性别角色仅作剧情推动，异性可攻略</div>
+      <div class="grid" id="playerGrid"></div>
+      <textarea id="customNote" placeholder="额外要求（可选）"></textarea>
+      <button class="btn primary" onclick="startStory()">开始故事</button>
+    </div>
+  </div>
+
+  <div id="play" class="hidden">
+    <div class="card story" id="storyText"></div>
+    <div class="choices" id="choices"></div>
+    <div id="loading" class="hidden">生成中...</div>
+    <button class="btn" onclick="restart()">重新开始</button>
+  </div>
+</div>
+
+<script>
+const worldviews = [
+  {name:"夜色契约", desc:"午夜签订秘密契约，以身体与灵魂为代价的禁断交易。", players:[
+    {name:"林夜",gender:"男",age:"28",appearance:"冷峻英挺，眼神深邃",personality:"冷静克制，内心欲望强烈",background:"表面律师"},
+    {name:"陈默",gender:"男",age:"32",appearance:"成熟稳重",personality:"掌控欲强",background:"组织高层"},
+    {name:"阿白",gender:"男",age:"26",appearance:"白发红瞳",personality:"偏执疯狂",background:"前任契约者"},
+    {name:"老K",gender:"男",age:"40",appearance:"沉默伤疤",personality:"冷酷",background:"执行人"},
+    {name:"小风",gender:"男",age:"24",appearance:"年轻锐气",personality:"好奇",background:"新加入"},
+    {name:"苏晚",gender:"女",age:"25",appearance:"黑长直清冷",personality:"高傲脆弱",background:"组织成员"},
+    {name:"小七",gender:"女",age:"22",appearance:"娇小可爱",personality:"心机",background:"诱饵"},
+    {name:"红姐",gender:"女",age:"35",appearance:"风情万种",personality:"精于算计",background:"酒吧老板"},
+    {name:"秘书",gender:"女",age:"24",appearance:"职业套装",personality:"表面恭顺",background:"助理"},
+    {name:"白露",gender:"女",age:"27",appearance:"清冷美人",personality:"冷淡",background:"神秘女子"}
+  ], npcs:[
+    {name:"见证者",gender:"男",age:"45",appearance:"阴沉",personality:"观察",background:"见证人"},
+    {name:"医生",gender:"女",age:"30",appearance:"冷静",personality:"专业",background:"处理伤势"},
+    {name:"司机",gender:"男",age:"38",appearance:"沉默",personality:"忠诚",background:"专属司机"},
+    {name:"店员",gender:"女",age:"23",appearance:"普通",personality:"好奇",background:"便利店"},
+    {name:"保镖",gender:"男",age:"35",appearance:"壮实",personality:"少言",background:"保护者"},
+    {name:"邻居",gender:"女",age:"29",appearance:"温柔",personality:"关心",background:"住附近"},
+    {name:"商人",gender:"男",age:"42",appearance:"精明",personality:"唯利",background:"地下交易"},
+    {name:"护士",gender:"女",age:"26",appearance:"干净",personality:"细心",background:"医院"},
+    {name:"警察",gender:"男",age:"33",appearance:"正义",personality:"多疑",background:"调查中"},
+    {name:"服务生",gender:"女",age:"21",appearance:"活泼",personality:"热情",background:"夜店"}
+  ]},
+  {name:"校园禁忌", desc:"精英大学中老师与学生、学长学妹之间的隐秘禁忌关系。", players:[
+    {name:"江澄",gender:"男",age:"22",appearance:"清爽学长",personality:"表面乖巧",background:"学生会"},
+    {name:"学长",gender:"男",age:"23",appearance:"运动型",personality:"保护欲",background:"篮球队"},
+    {name:"李教授",gender:"男",age:"38",appearance:"成熟稳重",personality:"威严带欲望",background:"院长"},
+    {name:"助教",gender:"男",age:"27",appearance:"斯文",personality:"内敛",background:"助教"},
+    {name:"室友",gender:"男",age:"21",appearance:"普通",personality:"八卦",background:"同寝"},
+    {name:"小柔",gender:"女",age:"19",appearance:"可爱学妹",personality:"单纯好奇",background:"新生"},
+    {name:"顾清",gender:"女",age:"30",appearance:"知性美女",personality:"严肃易动摇",background:"教授"},
+    {name:"社团学姐",gender:"女",age:"21",appearance:"御姐",personality:"强势主动",background:"话剧社"},
+    {name:"图书馆",gender:"女",age:"27",appearance:"安静文静",personality:"内敛敏感",background:"管理员"},
+    {name:"室友A",gender:"女",age:"20",appearance:"活泼",personality:"直率",background:"室友"}
+  ], npcs:[
+    {name:"保安",gender:"男",age:"40",appearance:"普通",personality:"尽责",background:"校园"},
+    {name:"食堂阿姨",gender:"女",age:"45",appearance:"热心",personality:"唠叨",background:"食堂"},
+    {name:"同学",gender:"男",age:"20",appearance:"普通",personality:"普通",background:"同班"},
+    {name:"学妹",gender:"女",age:"18",appearance:"清纯",personality:"崇拜",background:"低年级"},
+    {name:"辅导员",gender:"女",age:"32",appearance:"干练",personality:"严格",background:"辅导员"},
+    {name:"校医",gender:"男",age:"35",appearance:"温和",personality:"专业",background:"医务室"},
+    {name:"清洁工",gender:"女",age:"50",appearance:"朴实",personality:"沉默",background:"校园"},
+    {name:"司机",gender:"男",age:"45",appearance:"沉默",personality:"老实",background:"校车"},
+    {name:"店员",gender:"女",age:"22",appearance:"普通",personality:"热情",background:"超市"},
+    {name:"路人",gender:"男",age:"25",appearance:"普通",personality:"普通",background:"校园"}
+  ]},
+  {name:"古代宫廷", desc:"后宫与权臣之间欲望与权力交织的宫廷秘事。", players:[
+    {name:"沈清秋",gender:"女",age:"22",appearance:"倾国倾城",personality:"聪明隐忍",background:"新贵人"},
+    {name:"贵妃",gender:"女",age:"26",appearance:"妖娆妩媚",personality:"争宠好胜",background:"宠妃"},
+    {name:"皇后",gender:"女",age:"28",appearance:"端庄华贵",personality:"心机深沉",background:"正宫"},
+    {name:"侍女",gender:"女",age:"18",appearance:"清秀可人",personality:"忠诚易动情",background:"贴身"},
+    {name:"才人",gender:"女",age:"20",appearance:"清纯",personality:"单纯",background:"低位"},
+    {name:"摄政王",gender:"男",age:"30",appearance:"俊美冷傲",personality:"占有欲极强",background:"权臣"},
+    {name:"皇帝",gender:"男",age:"35",appearance:"威严成熟",personality:"多疑宠溺",background:"天子"},
+    {name:"将军",gender:"男",age:"32",appearance:"粗犷英武",personality:"直率热情",background:"边关"},
+    {name:"太监",gender:"男",age:"40",appearance:"阴柔",personality:"八面玲珑",background:"宫中"},
+    {name:"侍卫",gender:"男",age:"25",appearance:"英武",personality:"忠诚",background:"守卫"}
+  ], npcs:[
+    {name:"宫女",gender:"女",age:"19",appearance:"普通",personality:"谨慎",background:"宫中"},
+    {name:"太医",gender:"男",age:"45",appearance:"老成",personality:"谨慎",background:"太医院"},
+    {name:"嬷嬷",gender:"女",age:"50",appearance:"严厉",personality:"管教",background:"宫中"},
+    {name:"小太监",gender:"男",age:"16",appearance:"瘦小",personality:"机灵",background:"跑腿"},
+    {name:"贵人",gender:"女",age:"23",appearance:"秀丽",personality:"争宠",background:"后宫"},
+    {name:"王爷",gender:"男",age:"28",appearance:"风流",personality:"多情",background:"皇亲"},
+    {name:"厨娘",gender:"女",age:"35",appearance:"朴实",personality:"热心",background:"御膳"},
+    {name:"禁卫",gender:"男",age:"30",appearance:"壮实",personality:"严肃",background:"守卫"},
+    {name:"乐师",gender:"女",age:"24",appearance:"柔美",personality:"温婉",background:"宫廷"},
+    {name:"宦官",gender:"男",age:"42",appearance:"阴柔",personality:"精明",background:"宫中"}
+  ]},
+  {name:"现代都市", desc:"城市中普通人之间的一夜情与长期关系。", players:[
+    {name:"你（男）",gender:"男",age:"27",appearance:"普通干净",personality:"内向渴望",background:"上班族"},
+    {name:"前男友",gender:"男",age:"29",appearance:"成熟稳重",personality:"念旧",background:"重逢"},
+    {name:"调酒师",gender:"男",age:"25",appearance:"纹身肌肉",personality:"随性诱惑",background:"夜店"},
+    {name:"房东",gender:"男",age:"35",appearance:"成熟大叔",personality:"温柔体贴",background:"单身"},
+    {name:"同事男",gender:"男",age:"28",appearance:"干练",personality:"认真",background:"公司"},
+    {name:"你（女）",gender:"女",age:"26",appearance:"气质清新",personality:"独立要强",background:"设计师"},
+    {name:"林夏",gender:"女",age:"26",appearance:"职业装美女",personality:"外冷内热",background:"同事"},
+    {name:"闺蜜",gender:"女",age:"25",appearance:"活泼开朗",personality:"直率",background:"朋友"},
+    {name:"邻居女",gender:"女",age:"28",appearance:"丰满诱惑",personality:"主动热情",background:"单身"},
+    {name:"前女友",gender:"女",age:"27",appearance:"熟悉",personality:"复杂",background:"过去"}
+  ], npcs:[
+    {name:"老板",gender:"男",age:"40",appearance:"成功",personality:"强势",background:"公司"},
+    {name:"咖啡师",gender:"女",age:"23",appearance:"可爱",personality:"热情",background:"咖啡店"},
+    {name:"健身教练",gender:"男",age:"30",appearance:"肌肉",personality:"阳光",background:"健身房"},
+    {name:"店员",gender:"女",age:"22",appearance:"普通",personality:"礼貌",background:"商场"},
+    {name:"司机",gender:"男",age:"45",appearance:"沉默",personality:"老实",background:"网约车"},
+    {name:"护士",gender:"女",age:"26",appearance:"干净",personality:"细心",background:"医院"},
+    {name:"警察",gender:"男",age:"33",appearance:"正义",personality:"严肃",background:"街头"},
+    {name:"美容师",gender:"女",age:"29",appearance:"精致",personality:"健谈",background:"美容院"},
+    {name:"快递员",gender:"男",age:"24",appearance:"年轻",personality:"腼腆",background:"送货"},
+    {name:"服务员",gender:"女",age:"21",appearance:"活泼",personality:"热情",background:"餐厅"}
+  ]},
+  {name:"末世废土", desc:"资源匮乏的世界里，身体成为唯一的交易货币。", players:[
+    {name:"阿风",gender:"男",age:"25",appearance:"精瘦有力",personality:"务实生存",background:"幸存者"},
+    {name:"队长",gender:"男",age:"32",appearance:"疤痕累累",personality:"冷酷果断",background:"首领"},
+    {name:"流浪者",gender:"男",age:"27",appearance:"风尘仆仆",personality:"危险迷人",background:"外来"},
+    {name:"商人",gender:"男",age:"40",appearance:"肥胖精明",personality:"唯利是图",background:"黑市"},
+    {name:"医生男",gender:"男",age:"30",appearance:"冷静",personality:"理性",background:"医疗"},
+    {name:"小月",gender:"女",age:"23",appearance:"清秀坚韧",personality:"为生存可付出一切",background:"避难所"},
+    {name:"医生女",gender:"女",age:"28",appearance:"冷静专业",personality:"理性克制",background:"唯一医生"},
+    {name:"少女",gender:"女",age:"20",appearance:"瘦弱",personality:"依赖",background:"被保护"},
+    {name:"战士",gender:"女",age:"26",appearance:"强壮",personality:"刚烈",background:"战斗"},
+    {name:"厨师",gender:"女",age:"35",appearance:"朴实",personality:"热心",background:"食物"}
+  ], npcs:[
+    {name:"守卫",gender:"男",age:"35",appearance:"壮实",personality:"警惕",background:"避难所"},
+    {name:"孩子",gender:"女",age:"16",appearance:"瘦小",personality:"害怕",background:"幸存者"},
+    {name:"技工",gender:"男",age:"38",appearance:"油污",personality:"沉默",background:"维修"},
+    {name:"护士",gender:"女",age:"24",appearance:"干净",personality:"细心",background:"医疗"},
+    {name:"猎手",gender:"男",age:"29",appearance:"精瘦",personality:"敏锐",background:"外出"},
+    {name:"孕妇",gender:"女",age:"27",appearance:"疲惫",personality:"脆弱",background:"待产"},
+    {name:"老人",gender:"男",age:"55",appearance:"沧桑",personality:"经验",background:"老者"},
+    {name:"少女2",gender:"女",age:"19",appearance:"清纯",personality:"好奇",background:"年轻人"},
+    {name:"暴徒",gender:"男",age:"33",appearance:"凶狠",personality:"危险",background:"外来"},
+    {name:"后勤",gender:"女",age:"31",appearance:"普通",personality:"勤劳",background:"物资"}
+  ]},
+  {name:"奇幻魔法", desc:"魔法学院与异世界中的契约与双修。", players:[
+    {name:"艾文",gender:"男",age:"21",appearance:"精灵般俊美",personality:"好奇好学",background:"学生"},
+    {name:"骑士",gender:"男",age:"26",appearance:"英武",personality:"正直却动摇",background:"守护"},
+    {name:"恶魔",gender:"男",age:"外表28",appearance:"黑翼红瞳",personality:"玩弄人心",background:"契约"},
+    {name:"同学",gender:"男",age:"21",appearance:"普通",personality:"暗恋",background:"同班"},
+    {name:"导师男",gender:"男",age:"外表35",appearance:"威严",personality:"严厉",background:"导师"},
+    {name:"莉娜",gender:"女",age:"22",appearance:"魔女气质",personality:"叛逆",background:"禁术"},
+    {name:"导师女",gender:"女",age:"外表25",appearance:"极致优雅",personality:"诱惑危险",background:"禁忌"},
+    {name:"精灵",gender:"女",age:"外表20",appearance:"银发尖耳",personality:"高傲冷淡",background:"公主"},
+    {name:"女仆",gender:"女",age:"23",appearance:"清纯",personality:"忠诚",background:"侍从"},
+    {name:"魔女",gender:"女",age:"外表30",appearance:"神秘",personality:"危险",background:"自由"}
+  ], npcs:[
+    {name:"校长",gender:"男",age:"外表50",appearance:"威严",personality:"公正",background:"学院"},
+    {name:"图书管理员",gender:"女",age:"外表28",appearance:"安静",personality:"博学",background:"图书馆"},
+    {name:"守卫",gender:"男",age:"30",appearance:"铠甲",personality:"忠诚",background:"学院"},
+    {name:"同学女",gender:"女",age:"20",appearance:"可爱",personality:"活泼",background:"同班"},
+    {name:"药剂师",gender:"男",age:"外表32",appearance:"瘦削",personality:"专注",background:"炼药"},
+    {name:"精灵侍女",gender:"女",age:"外表18",appearance:"清秀",personality:"温顺",background:"精灵"},
+    {name:"魔兽",gender:"男",age:"外表25",appearance:"兽人",personality:"野性",background:"森林"},
+    {name:"女巫",gender:"女",age:"外表40",appearance:"神秘",personality:"预言",background:"隐居"},
+    {name:"骑士学徒",gender:"男",age:"19",appearance:"年轻",personality:"热血",background:"学徒"},
+    {name:"魔法生物",gender:"女",age:"外表22",appearance:"幻影",personality:"魅惑",background:"召唤物"}
+  ]},
+  {name:"办公室恋情", desc:"上司下属与同事之间的办公室秘密。", players:[
+    {name:"你（男）",gender:"男",age:"29",appearance:"西装革履",personality:"认真大胆",background:"中层管理"},
+    {name:"同事男",gender:"男",age:"30",appearance:"稳重",personality:"暗中竞争",background:"同部门"},
+    {name:"客户",gender:"男",age:"36",appearance:"成功人士",personality:"强势诱惑",background:"重要客户"},
+    {name:"实习生男",gender:"男",age:"23",appearance:"年轻",personality:"上进",background:"实习生"},
+    {name:"老板男",gender:"男",age:"40",appearance:"成熟",personality:"强势",background:"老板"},
+    {name:"你（女）",gender:"女",age:"27",appearance:"职业套装",personality:"要强",background:"项目经理"},
+    {name:"王总",gender:"女",age:"34",appearance:"干练御姐",personality:"强势渴望被征服",background:"女上司"},
+    {name:"实习生女",gender:"女",age:"22",appearance:"清纯",personality:"崇拜",background:"实习生"},
+    {name:"秘书",gender:"女",age:"25",appearance:"精致",personality:"表面恭顺",background:"秘书"},
+    {name:"同事女",gender:"女",age:"28",appearance:"干练",personality:"独立",background:"同事"}
+  ], npcs:[
+    {name:"前台",gender:"女",age:"24",appearance:"职业微笑",personality:"礼貌",background:"前台"},
+    {name:"IT",gender:"男",age:"26",appearance:"眼镜",personality:"内向",background:"技术"},
+    {name:"财务",gender:"女",age:"32",appearance:"严谨",personality:"认真",background:"财务"},
+    {name:"保安",gender:"男",age:"45",appearance:"普通",personality:"尽责",background:"大楼"},
+    {name:"清洁",gender:"女",age:"40",appearance:"朴实",personality:"沉默",background:"清洁"},
+    {name:"司机",gender:"男",age:"38",appearance:"沉默",personality:"老实",background:"专车"},
+    {name:"咖啡师",gender:"女",age:"23",appearance:"可爱",personality:"热情",background:"楼下"},
+    {name:"客户助理",gender:"男",age:"28",appearance:"干练",personality:"圆滑",background:"客户方"},
+    {name:"实习生2",gender:"女",age:"21",appearance:"清纯",personality:"紧张",background:"新来"},
+    {name:"部门经理",gender:"男",age:"35",appearance:"成熟",personality:"严格",background:"上级"}
+  ]},
+  {name:"邻居秘密", desc:"隔壁邻居之间的窥视与越界。", players:[
+    {name:"你（男）",gender:"男",age:"26",appearance:"居家型",personality:"好奇",background:"独居"},
+    {name:"对门男生",gender:"男",age:"25",appearance:"阳光",personality:"热情",background:"健身"},
+    {name:"保安",gender:"男",age:"30",appearance:"壮实",personality:"沉默观察",background:"小区"},
+    {name:"送外卖",gender:"男",age:"23",appearance:"年轻",personality:"腼腆",background:"经常来"},
+    {name:"楼上男",gender:"男",age:"32",appearance:"成熟",personality:"安静",background:"独居"},
+    {name:"你（女）",gender:"女",age:"24",appearance:"清秀",personality:"敏感",background:"新搬"},
+    {name:"邻居姐姐",gender:"女",age:"28",appearance:"丰满诱惑",personality:"主动热情",background:"单身"},
+    {name:"楼上阿姨",gender:"女",age:"32",appearance:"成熟",personality:"寂寞",background:"离婚"},
+    {name:"对门女",gender:"女",age:"26",appearance:"清纯",personality:"内向",background:"邻居"},
+    {name:"楼下女",gender:"女",age:"29",appearance:"御姐",personality:"强势",background:"独居"}
+  ], npcs:[
+    {name:"物业",gender:"男",age:"40",appearance:"普通",personality:"尽责",background:"管理"},
+    {name:"清洁阿姨",gender:"女",age:"50",appearance:"热心",personality:"唠叨",background:"小区"},
+    {name:"快递员",gender:"男",age:"24",appearance:"年轻",personality:"礼貌",background:"送货"},
+    {name:"业主",gender:"女",age:"35",appearance:"普通",personality:"普通",background:"邻居"},
+    {name:"保安2",gender:"男",age:"28",appearance:"年轻",personality:"热心",background:"门卫"},
+    {name:"小孩",gender:"女",age:"8",appearance:"可爱",personality:"活泼",background:"邻居孩子"},
+    {name:"老人",gender:"男",age:"60",appearance:"慈祥",personality:"关心",background:"独居老人"},
+    {name:"保姆",gender:"女",age:"42",appearance:"朴实",personality:"勤劳",background:"帮佣"},
+    {name:"装修工",gender:"男",age:"35",appearance:"壮实",personality:"粗犷",background:"施工"},
+    {name:"宠物店员",gender:"女",age:"25",appearance:"温柔",personality:"爱动物",background:"附近"}
+  ]},
+  {name:"酒店一夜", desc:"陌生城市酒店里的纯粹欲望。", players:[
+    {name:"你（男）",gender:"男",age:"30",appearance:"商务精英",personality:"果断",background:"出差"},
+    {name:"邻房",gender:"男",age:"32",appearance:"成熟",personality:"大胆",background:"隔壁"},
+    {name:"酒保",gender:"男",age:"25",appearance:"帅气",personality:"撩人",background:"酒店酒吧"},
+    {name:"前台男",gender:"男",age:"26",appearance:"干练",personality:"礼貌",background:"前台"},
+    {name:"经理",gender:"男",age:"38",appearance:"稳重",personality:"专业",background:"酒店经理"},
+    {name:"你（女）",gender:"女",age:"28",appearance:"优雅",personality:"放纵",background:"独自旅行"},
+    {name:"酒吧女人",gender:"女",age:"27",appearance:"性感优雅",personality:"神秘放纵",background:"邂逅"},
+    {name:"前台女",gender:"女",age:"24",appearance:"职业微笑",personality:"好奇",background:"前台"},
+    {name:"按摩师",gender:"女",age:"26",appearance:"柔美",personality:"专业暧昧",background:"SPA"},
+    {name:"服务员",gender:"女",age:"23",appearance:"清纯",personality:"热情",background:"客房"}
+  ], npcs:[
+    {name:"保安",gender:"男",age:"35",appearance:"壮实",personality:"警惕",background:"酒店"},
+    {name:"清洁",gender:"女",age:"40",appearance:"朴实",personality:"沉默",background:"客房"},
+    {name:"厨师",gender:"男",age:"42",appearance:"普通",personality:"专注",background:"餐厅"},
+    {name:"行李员",gender:"男",age:"22",appearance:"年轻",personality:"热心",background:"门童"},
+    {name:"客服",gender:"女",age:"25",appearance:"职业",personality:"礼貌",background:"客服"},
+    {name:"客人",gender:"女",age:"30",appearance:"普通",personality:"普通",background:"其他客人"},
+    {name:"司机",gender:"男",age:"45",appearance:"沉默",personality:"老实",background:"接送"},
+    {name:"美容师",gender:"女",age:"29",appearance:"精致",personality:"健谈",background:"SPA"},
+    {name:"调酒师2",gender:"男",age:"28",appearance:"帅气",personality:"随性",background:"酒吧"},
+    {name:"服务员2",gender:"女",age:"21",appearance:"活泼",personality:"热情",background:"餐厅"}
+  ]},
+  {name:"旅行邂逅", desc:"旅途中短暂而激烈的关系。", players:[
+    {name:"你（男）",gender:"男",age:"25",appearance:"背包客",personality:"自由随性",background:"独自旅行"},
+    {name:"导游",gender:"男",age:"28",appearance:"阳光",personality:"健谈",background:"当地"},
+    {name:"司机",gender:"男",age:"35",appearance:"粗犷",personality:"沉默热情",background:"包车"},
+    {name:"旅伴男",gender:"男",age:"26",appearance:"普通",personality:"随性",background:"偶遇"},
+    {name:"民宿老板",gender:"男",age:"32",appearance:"成熟",personality:"热情",background:"民宿"},
+    {name:"你（女）",gender:"女",age:"24",appearance:"文艺",personality:"浪漫",background:"毕业旅行"},
+    {name:"当地女孩",gender:"女",age:"23",appearance:"异域风情",personality:"热情奔放",background:"民宿老板"},
+    {name:"旅伴女",gender:"女",age:"26",appearance:"独立",personality:"洒脱",background:"偶遇"},
+    {name:"酒吧歌手",gender:"女",age:"27",appearance:"魅力四射",personality:"自由",background:"表演"},
+    {name:"向导",gender:"女",age:"25",appearance:"清秀",personality:"热情",background:"当地向导"}
+  ], npcs:[
+    {name:"老板娘",gender:"女",age:"40",appearance:"热情",personality:"健谈",background:"餐厅"},
+    {name:"游客",gender:"男",age:"30",appearance:"普通",personality:"普通",background:"其他游客"},
+    {name:"店员",gender:"女",age:"22",appearance:"可爱",personality:"热情",background:"纪念品"},
+    {name:"司机2",gender:"男",age:"38",appearance:"沉默",personality:"老实",background:"本地"},
+    {name:"艺人",gender:"女",age:"24",appearance:"漂亮",personality:"活泼",background:"表演"},
+    {name:"警察",gender:"男",age:"33",appearance:"正义",personality:"严肃",background:"当地"},
+    {name:"导游2",gender:"女",age:"29",appearance:"干练",personality:"专业",background:"团队"},
+    {name:"摄影师",gender:"男",age:"27",appearance:"文艺",personality:"安静",background:"旅行者"},
+    {name:"服务员",gender:"女",age:"21",appearance:"清纯",personality:"腼腆",background:"餐厅"},
+    {name:"老板",gender:"男",age:"45",appearance:"精明",personality:"热情",background:"商店"}
+  ]},
+  {name:"同居生活", desc:"被迫同居后逐渐沦陷的日常。", players:[
+    {name:"你（男）",gender:"男",age:"24",appearance:"阳光男孩",personality:"有点宅",background:"刚搬进来"},
+    {name:"另一个室友",gender:"男",age:"25",appearance:"运动型",personality:"热情",background:"三人合租"},
+    {name:"朋友",gender:"男",age:"24",appearance:"普通",personality:"八卦",background:"常来串门"},
+    {name:"前男友",gender:"男",age:"26",appearance:"熟悉",personality:"念旧",background:"突然来"},
+    {name:"房东男",gender:"男",age:"38",appearance:"成熟",personality:"观察",background:"房东"},
+    {name:"你（女）",gender:"女",age:"23",appearance:"清纯",personality:"独立",background:"合租发起"},
+    {name:"室友",gender:"女",age:"23",appearance:"清纯邻家",personality:"外冷内热",background:"合租"},
+    {name:"前女友",gender:"女",age:"24",appearance:"熟悉",personality:"念旧",background:"突然来访"},
+    {name:"房东女",gender:"女",age:"30",appearance:"成熟",personality:"观察",background:"收租"},
+    {name:"闺蜜",gender:"女",age:"23",appearance:"活泼",personality:"直率",background:"常来"}
+  ], npcs:[
+    {name:"邻居",gender:"男",age:"28",appearance:"普通",personality:"礼貌",background:"隔壁"},
+    {name:"物业",gender:"女",age:"35",appearance:"干练",personality:"尽责",background:"管理"},
+    {name:"快递员",gender:"男",age:"24",appearance:"年轻",personality:"腼腆",background:"送货"},
+    {name:"超市店员",gender:"女",age:"22",appearance:"普通",personality:"热情",background:"附近"},
+    {name:"同事",gender:"男",age:"25",appearance:"普通",personality:"普通",background:"工作"},
+    {name:"同学",gender:"女",age:"23",appearance:"熟悉",personality:"关心",background:"大学"},
+    {name:"维修工",gender:"男",age:"40",appearance:"壮实",personality:"沉默",background:"修东西"},
+    {name:"清洁",gender:"女",age:"45",appearance:"朴实",personality:"勤劳",background:"打扫"},
+    {name:"朋友2",gender:"男",age:"24",appearance:"阳光",personality:"热情",background:"聚会"},
+    {name:"店员",gender:"女",age:"21",appearance:"可爱",personality:"礼貌",background:"便利店"}
+  ]},
+  {name:"身份互换", desc:"身体互换后的尴尬与禁忌体验。", players:[
+    {name:"你（男）",gender:"男",age:"27",appearance:"普通男性",personality:"理性",background:"被互换"},
+    {name:"她的男朋友",gender:"男",age:"28",appearance:"帅气",personality:"不知情",background:"男友"},
+    {name:"医生",gender:"男",age:"35",appearance:"专业",personality:"冷静",background:"解释现象"},
+    {name:"陌生人",gender:"男",age:"30",appearance:"神秘",personality:"知情",background:"可能知道真相"},
+    {name:"同事男",gender:"男",age:"29",appearance:"普通",personality:"关心",background:"察觉异常"},
+    {name:"她",gender:"女",age:"25",appearance:"美女身体",personality:"原主人性格",background:"互换对象"},
+    {name:"你的同事",gender:"女",age:"26",appearance:"熟悉",personality:"关心",background:"察觉异常"},
+    {name:"闺蜜",gender:"女",age:"25",appearance:"亲近",personality:"好奇",background:"她的闺蜜"},
+    {name:"医生女",gender:"女",age:"32",appearance:"专业",personality:"冷静",background:"检查"},
+    {name:"陌生人女",gender:"女",age:"28",appearance:"神秘",personality:"观察",background:"知情者"}
+  ], npcs:[
+    {name:"家人",gender:"女",age:"50",appearance:"普通",personality:"关心",background:"父母"},
+    {name:"朋友",gender:"男",age:"27",appearance:"普通",personality:"八卦",background:"朋友"},
+    {name:"邻居",gender:"女",age:"30",appearance:"普通",personality:"普通",background:"隔壁"},
+    {name:"警察",gender:"男",age:"33",appearance:"正义",personality:"多疑",background:"调查"},
+    {name:"店员",gender:"女",age:"23",appearance:"普通",personality:"礼貌",background:"商店"},
+    {name:"同事2",gender:"男",age:"28",appearance:"干练",personality:"普通",background:"公司"},
+    {name:"医生助理",gender:"女",age:"24",appearance:"干净",personality:"细心",background:"医院"},
+    {name:"路人",gender:"男",age:"25",appearance:"普通",personality:"普通",background:"街头"},
+    {name:"老板",gender:"男",age:"40",appearance:"成功",personality:"强势",background:"公司"},
+    {name:"服务员",gender:"女",age:"22",appearance:"活泼",personality:"热情",background:"餐厅"}
+  ]},
+  {name:"黑暗契约", desc:"恶魔或超自然存在的契约与献祭。", players:[
+    {name:"你（男）",gender:"男",age:"29",appearance:"疲惫的普通人",personality:"绝望中寻求力量",background:"签下契约"},
+    {name:"守护者",gender:"男",age:"外表30",appearance:"圣洁",personality:"对立",background:"试图拯救"},
+    {name:"祭司",gender:"男",age:"40",appearance:"神秘",personality:"引导",background:"仪式主持"},
+    {name:"前任男",gender:"男",age:"外表32",appearance:"憔悴",personality:"警告",background:"失败先例"},
+    {name:"恶魔男",gender:"男",age:"外表28",appearance:"诱惑",personality:"玩弄",background:"契约"},
+    {name:"你（女）",gender:"女",age:"26",appearance:"清秀",personality:"倔强",background:"为家人签下"},
+    {name:"魅魔",gender:"女",age:"外表25",appearance:"极致诱惑",personality:"玩弄人心",background:"契约恶魔"},
+    {name:"前任女",gender:"女",age:"外表28",appearance:"憔悴美丽",personality:"警告",background:"失败先例"},
+    {name:"梦中人",gender:"女",age:"外表22",appearance:"虚幻",personality:"诱惑",background:"契约幻象"},
+    {name:"祭司女",gender:"女",age:"外表35",appearance:"神秘",personality:"引导",background:"仪式"}
+  ], npcs:[
+    {name:"家人",gender:"女",age:"50",appearance:"普通",personality:"担心",background:"家人"},
+    {name:"朋友",gender:"男",age:"30",appearance:"普通",personality:"关心",background:"朋友"},
+    {name:"医生",gender:"男",age:"40",appearance:"专业",personality:"冷静",background:"医院"},
+    {name:"邻居",gender:"女",age:"35",appearance:"普通",personality:"观察",background:"隔壁"},
+    {name:"警察",gender:"男",age:"33",appearance:"正义",personality:"多疑",background:"调查"},
+    {name:"店员",gender:"女",age:"24",appearance:"普通",personality:"礼貌",background:"商店"},
+    {name:"同事",gender:"男",age:"29",appearance:"普通",personality:"普通",background:"工作"},
+    {name:"路人",gender:"女",age:"25",appearance:"普通",personality:"普通",background:"街头"},
+    {name:"老板",gender:"男",age:"45",appearance:"成功",personality:"强势",background:"公司"},
+    {name:"服务员",gender:"女",age:"22",appearance:"活泼",personality:"热情",background:"餐厅"}
+  ]},
+  {name:"谁先低头", desc:"强强对决，谁先忍不住谁就输。", players:[
+    {name:"你（男）",gender:"男",age:"31",appearance:"精英气场",personality:"好胜心强",background:"商业对手"},
+    {name:"共同朋友",gender:"男",age:"32",appearance:"圆滑",personality:"调解者",background:"两边认识"},
+    {name:"新来的",gender:"男",age:"26",appearance:"年轻锐气",personality:"挑战",background:"新竞争者"},
+    {name:"前男友",gender:"男",age:"33",appearance:"熟悉",personality:"复杂",background:"过去"},
+    {name:"助理男",gender:"男",age:"28",appearance:"干练",personality:"忠诚",background:"助理"},
+    {name:"你（女）",gender:"女",age:"29",appearance:"女强人",personality:"绝不示弱",background:"竞争对手"},
+    {name:"她",gender:"女",age:"29",appearance:"同样强势",personality:"针锋相对",background:"直接对手"},
+    {name:"助理",gender:"女",age:"24",appearance:"精明",personality:"忠诚观察",background:"你的助理"},
+    {name:"前女友",gender:"女",age:"30",appearance:"熟悉",personality:"复杂",background:"过去的人"},
+    {name:"秘书",gender:"女",age:"25",appearance:"精致",personality:"表面恭顺",background:"秘书"}
+  ], npcs:[
+    {name:"老板",gender:"男",age:"45",appearance:"成功",personality:"强势",background:"公司"},
+    {name:"同事",gender:"女",age:"28",appearance:"普通",personality:"普通",background:"公司"},
+    {name:"客户",gender:"男",age:"38",appearance:"成功",personality:"强势",background:"客户"},
+    {name:"前台",gender:"女",age:"24",appearance:"职业",personality:"礼貌",background:"前台"},
+    {name:"司机",gender:"男",age:"40",appearance:"沉默",personality:"忠诚",background:"专车"},
+    {name:"财务",gender:"女",age:"35",appearance:"严谨",personality:"认真",background:"财务"},
+    {name:"IT",gender:"男",age:"27",appearance:"眼镜",personality:"内向",background:"技术"},
+    {name:"清洁",gender:"女",age:"45",appearance:"朴实",personality:"沉默",background:"清洁"},
+    {name:"保安",gender:"男",age:"38",appearance:"壮实",personality:"尽责",background:"大楼"},
+    {name:"服务员",gender:"女",age:"23",appearance:"活泼",personality:"热情",background:"餐厅"}
+  ]}
+];
+
+let messages = [];
+let currentWorld = null;
+let selectedPlayer = null;
+
+function init() {
+  const saved = localStorage.getItem("grok_key");
+  if (saved) document.getElementById("apiKey").value = saved;
+}
+
+async function verifyAndNext() {
+  const key = document.getElementById("apiKey").value.trim();
+  const model = document.getElementById("model").value.trim() || "grok-4.7";
+  const status = document.getElementById("apiStatus");
+  if (!key) { status.textContent = "请填写 API Key"; status.className = "status error"; return; }
+  status.textContent = "验证中...";
+  status.className = "status";
+  const ok = await verifyAPI(key, model);
+  if (ok) {
+    localStorage.setItem("grok_key", key);
+    status.textContent = "验证成功";
+    document.getElementById("stepApi").classList.add("hidden");
+    document.getElementById("stepWorld").classList.remove("hidden");
+    renderWorlds();
+  } else {
+    status.textContent = "验证失败，请检查 Key 或模型";
+    status.className = "status error";
+  }
+}
+
+async function verifyAPI(key, model) {
+  try {
+    const res = await fetch("https://api.x.ai/v1/chat/completions", {
+      method: "POST",
+      headers: { "Authorization": "Bearer " + key, "Content-Type": "application/json" },
+      body: JSON.stringify({ model, messages: [{role:"user", content:"hi"}], max_tokens: 5 })
+    });
+    return res.ok;
+  } catch { return false; }
+}
+
+function renderWorlds() {
+  const grid = document.getElementById("worldGrid");
+  grid.innerHTML = "";
+  worldviews.forEach((w, i) => {
+    const btn = document.createElement("button");
+    btn.className = "btn world-btn";
+    btn.innerHTML = `<strong>${w.name}</strong><span class="small">${w.desc}</span>`;
+    btn.onclick = () => selectWorld(i);
+    grid.appendChild(btn);
+  });
+}
+
+function selectWorld(idx) {
+  currentWorld = worldviews[idx];
+  document.getElementById("stepWorld").classList.add("hidden");
+  document.getElementById("stepChar").classList.remove("hidden");
+  renderPlayers();
+}
+
+function renderPlayers() {
+  const grid = document.getElementById("playerGrid");
+  grid.innerHTML = "";
+  currentWorld.players.forEach(p => {
+    const btn = document.createElement("button");
+    btn.className = "btn";
+    btn.innerHTML = `<strong>${p.name}</strong><span class="small">${p.gender} · ${p.age}岁 · ${p.appearance}</span>`;
+    btn.onclick = () => {
+      document.querySelectorAll("#playerGrid .btn").forEach(b => b.classList.remove("selected"));
+      btn.classList.add("selected");
+      selectedPlayer = p;
+    };
+    grid.appendChild(btn);
+  });
+}
+
+async function startStory() {
+  if (!selectedPlayer) { alert("请选择角色"); return; }
+  const key = document.getElementById("apiKey").value.trim();
+  const model = document.getElementById("model").value.trim() || "grok-4.7";
+  const note = document.getElementById("customNote").value.trim();
+
+  const allOthers = [...currentWorld.players.filter(p => p.name !== selectedPlayer.name), ...currentWorld.npcs];
+  const sameGender = allOthers.filter(c => c.gender === selectedPlayer.gender);
+  const opposite = allOthers.filter(c => c.gender !== selectedPlayer.gender);
+
+  let sys = `你是一位顶级情色文学作家与互动小说设计师。每一节正文必须800字以上，文笔细腻、感官强烈、性爱描写具体精彩（详细描写身体接触、快感、心理变化）。
+需要选择时，必须在最后以以下格式给出选项（2-4个）：
+
+选项：
+A. 选项内容
+B. 选项内容
+C. 选项内容
+D. 选项内容
+
+所有角色必须是成年人。
+
+【世界观】${currentWorld.name}：${currentWorld.desc}
+
+【玩家角色】${selectedPlayer.name}（${selectedPlayer.gender}，${selectedPlayer.age}岁）
+外貌：${selectedPlayer.appearance}
+性格：${selectedPlayer.personality}
+背景：${selectedPlayer.background}
+
+【重要规则】
+- 同性别角色只作为剧情推动者，不进行恋爱或性相关互动。
+- 异性角色可以被攻略，可以进行亲密互动。
+
+同性别角色（仅剧情）：${sameGender.map(c => c.name).join("、")}
+可攻略异性：${opposite.map(c => c.name).join("、")}
+`;
+  if (note) sys += `\n【额外要求】${note}\n`;
+
+  messages = [{role:"system", content:sys}];
+
+  document.getElementById("stepChar").classList.add("hidden");
+  document.getElementById("play").classList.remove("hidden");
+  document.getElementById("storyText").textContent = "";
+  document.getElementById("choices").innerHTML = "";
+  await generate();
+}
+
+async function generate() {
+  const key = document.getElementById("apiKey").value.trim();
+  const model = document.getElementById("model").value.trim() || "grok-4.7";
+  document.getElementById("loading").classList.remove("hidden");
+  try {
+    const res = await fetch("https://api.x.ai/v1/chat/completions", {
+      method: "POST",
+      headers: { "Authorization": "Bearer " + key, "Content-Type": "application/json" },
+      body: JSON.stringify({ model, messages, temperature: 0.85, max_tokens: 2500 })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    const text = data.choices?.[0]?.message?.content || "生成失败";
+    messages.push({role:"assistant", content:text});
+    parseAndShow(text);
+  } catch (e) {
+    document.getElementById("storyText").textContent = "API 错误：\n" + e.message;
+  }
+  document.getElementById("loading").classList.add("hidden");
+}
+
+function parseAndShow(text) {
+  const idx = text.indexOf("选项：");
+  let body = text;
+  let opts = [];
+  if (idx !== -1) {
+    body = text.substring(0, idx).trim();
+    const part = text.substring(idx + 3);
+    part.split("\n").forEach(line => {
+      line = line.trim();
+      if (/^[ABCD]\./.test(line)) opts.push({letter: line[0], text: line.substring(2).trim()});
+    });
+  }
+  document.getElementById("storyText").textContent = body;
+  const box = document.getElementById("choices");
+  box.innerHTML = "";
+  opts.forEach(o => {
+    const btn = document.createElement("button");
+    btn.className = "btn";
+    btn.textContent = o.letter + ". " + o.text;
+    btn.onclick = () => choose(o.text);
+    box.appendChild(btn);
+  });
+}
+
+async function choose(text) {
+  messages.push({role:"user", content:"我选择：" + text});
+  document.getElementById("choices").innerHTML = "";
+  await generate();
+}
+
+function restart() {
+  messages = [];
+  currentWorld = null;
+  selectedPlayer = null;
+  document.getElementById("play").classList.add("hidden");
+  document.getElementById("stepApi").classList.remove("hidden");
+  document.getElementById("apiStatus").textContent = "";
+}
+
+init();
+</script>
+</body>
+</html>
